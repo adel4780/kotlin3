@@ -10,24 +10,34 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.FileObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Divider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.io.File
 
 
 class MainActivity : ComponentActivity() {
@@ -50,7 +60,8 @@ class MainActivity : ComponentActivity() {
 
 
         setContent {
-            BluetoothStatusDisplay(bluetoothStatus)
+            LogDisplayScreen(this)
+//            BluetoothStatusDisplay(bluetoothStatus)
         }
 
         val bluetoothStatusReceiver = object : BroadcastReceiver() {
@@ -93,6 +104,72 @@ class MainActivity : ComponentActivity() {
 
 }
 
+fun readLogsFromFile(context: Context): List<String> {
+    val logFile = File(context.filesDir, "status_logs.txt")
+    val logs = mutableListOf<String>()
+
+    if (logFile.exists()) {
+        logFile.useLines { lines ->
+            lines.forEach { line ->
+                val jsonObject = JSONObject(line)
+                val timestamp = jsonObject.getString("timestamp")
+                val bluetoothEnabled = jsonObject.getBoolean("bluetooth_enabled")
+                val airplaneModeOn = jsonObject.getBoolean("airplane_mode_on")
+
+                val logMessage =
+                    "time: ${timestamp}\nBluetooth is ${if (bluetoothEnabled) "Enabled" else "Disabled"},\nAirplane mode is" + " ${
+                        if
+                                (airplaneModeOn) "On" else "Off"
+                    }"
+                logs.add(logMessage)
+            }
+        }
+    }
+
+    return logs.reversed()
+
+}
+
+class LogFileObserver(
+    private val context: Context,
+    private val callback: () -> Unit
+) : FileObserver(context.filesDir.path + "/status_logs.txt", CREATE or MODIFY) {
+
+    override fun onEvent(event: Int, path: String?) {
+        if (event == CREATE || event == MODIFY) {
+            callback()
+        }
+    }
+}
+
+@Composable
+fun LogDisplayScreen(context: Context) {
+    val logs = remember { mutableStateOf(readLogsFromFile(context)) }
+
+    val observer = remember {
+        LogFileObserver(context) {
+            logs.value = readLogsFromFile(context)
+        }
+    }
+
+    DisposableEffect(context) {
+        observer.startWatching()
+        onDispose {
+            observer.stopWatching()
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(8.dp),
+    ) {
+        items(logs.value) { log ->
+            Text(text = log)
+            Divider()
+        }
+    }
+}
 
 @Composable
 fun BluetoothStatusDisplay(status: String) {
